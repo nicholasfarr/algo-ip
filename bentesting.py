@@ -57,5 +57,5 @@ def backtest(): # general purpose backtesting function for now
             daily_scores[symbol] = score
         alloc = generate_allocations(daily_scores)
         allocations[d] = alloc
-    print(allocations)
+    return allocations
 backtest()
