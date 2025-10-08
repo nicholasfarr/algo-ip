@@ -13,20 +13,13 @@ def compute_scores(prices, lookback=100, vol_window=30):
     )
     nan_padding = pd.DataFrame(np.nan, index=prices.index[:200], columns=prices.columns)
     momentum = pd.concat([nan_padding, momentum]).iloc[:len(prices)]
-    vol = prices.pct_change().rolling(vol_window).std()
-    vol_of_vol = vol.pct_change().rolling(vol_window).std()
     daily_ret = prices.pct_change()
     downside = daily_ret.copy()
     downside[downside > 0] = 0  # only negative returns
     dd30 = downside.rolling(vol_window).std()  # downside deviation
+    vol_of_vol = dd30.pct_change().rolling(vol_window).std()
     score = momentum / ((vol_of_vol) + (dd30))
-    correlations = pd.DataFrame(index=prices.columns, columns=["corr_with_momentum"])
-    for col in prices.columns:
-        correlations.loc[col, "corr_with_momentum"] = score[col].corr(momentum[col])
-    print(correlations)
-    print(score)
-    score = momentum
-    print(score)
+
     return score
 
 def backtest_with_vol_adjusted_allocation(price_file="data_testing.csv",
@@ -38,7 +31,7 @@ def backtest_with_vol_adjusted_allocation(price_file="data_testing.csv",
                                           vol_window=30,
                                           max_alloc=0.1,
                                           vol_scale_window=30,
-                                          vol_threshold=0.02,
+                                          vol_threshold=0.01,
                                           trans_fee=1):
     """
     vol_scale_window: number of days to compute average portfolio volatility
@@ -73,7 +66,6 @@ def backtest_with_vol_adjusted_allocation(price_file="data_testing.csv",
                 to_close.append(sym)
         for sym in to_close:
             del positions[sym]
-
         # --- Compute market volatility proxy ---
         if i >= vol_scale_window:
             recent_prices = prices.iloc[i-vol_scale_window:i]
@@ -87,6 +79,7 @@ def backtest_with_vol_adjusted_allocation(price_file="data_testing.csv",
         else:
             # Linear scaling: reduce allocation as vol increases
             vol_multiplier = max(0.1, vol_threshold / daily_vol)
+
 
         # --- Select buy candidates ---
         if len(current_scores) > 0:
@@ -141,12 +134,16 @@ def backtest_with_vol_adjusted_allocation(price_file="data_testing.csv",
     daily_returns = equity_series.pct_change().dropna()
     sharpe = (daily_returns.mean() / daily_returns.std() * np.sqrt(252)) if len(daily_returns) > 0 else 0
     max_dd = ((equity_series.cummax() - equity_series) / equity_series.cummax()).max() * 100
-
+    downside_returns = daily_returns.copy()
+    downside_returns[downside_returns > 0] = 0  # keep only negative returns
+    downside_std = downside_returns.std()
+    sortino = (daily_returns.mean() / downside_std * np.sqrt(252)) if downside_std > 0 else 0
     return {
         "equity_curve": equity_series,
         "daily_pnl": pnl_series,
         "total_return_pct": round(total_return, 2),
         "sharpe_ratio": round(sharpe, 2),
+        "sortino_ratio": round(sortino, 2),
         "max_drawdown_pct": round(max_dd, 2),
         "final_value": round(equity_series.iloc[-1], 2),
         "total_pnl": round(equity_series.iloc[-1] - initial_capital, 2),
@@ -156,6 +153,7 @@ if __name__ == "__main__":
     results = backtest_with_vol_adjusted_allocation("data_testing.csv")
     print(f"Total Return: {results['total_return_pct']}%")
     print(f"Sharpe Ratio: {results['sharpe_ratio']}")
+    print(f"Sortino Ratio: {results['sortino_ratio']}")
     print(f"Max Drawdown: {results['max_drawdown_pct']}%")
     print(f"Final Value: ${results['final_value']:,.2f}")
     print(f"Total P/L: ${results['total_pnl']:,.2f}")
